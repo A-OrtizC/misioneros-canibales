@@ -3,69 +3,78 @@ import numpy as np
 import mss
 import pyautogui
 import time
+from collections import deque
 
 estados_terminar = [((0, 0, 0, 0), (0, 0, 0, 0)), ((3, 0, 0, 0), (3, 0, 0, 0))]
 
 class Agent:
-    B1 = ((0,3,0,0),(0,3,0,0))
-    B2 = ((0,2,0,1),(0,3,0,0))
-    B3 = ((0,1,0,2),(0,3,0,0))
-    B4 = ((0,1,2,0),(0,3,0,0))
-    B5 = ((1,1,1,0),(0,3,0,0))
-    B6 = ((1,1,0,1),(0,3,0,0))
-    B7 = ((1,0,0,2),(0,3,0,0))
-    B8 = ((1,0,2,0),(0,3,0,0))
-    B9 = ((2,0,1,0),(0,3,0,0))
-    B10 = ((2,0,0,1),(0,3,0,0))
-    B11 = ((2,1,0,0),(0,3,0,0))
-    B12 = ((2,1,0,0),(0,2,0,1))
-    B13 = ((2,1,0,0),(0,1,0,2))
-    B14 = ((2,1,0,0),(0,1,2,0))
-    B15 = ((2,1,0,0),(1,1,1,0))
-    B16 = ((1,1,1,0),(1,1,1,0))
-    B17 = ((1,1,0,1),(1,1,0,1))
-    B18 = ((1,2,0,0),(1,1,0,1))
-    B19 = ((1,2,0,0),(1,0,0,2))
-    B20 = ((1,2,0,0),(1,0,2,0))
-    B21 = ((1,2,0,0),(2,0,1,0))
-    B22 = ((1,2,0,0),(3,0,0,0))
-    B23 = ((0,2,1,0),(3,0,0,0))
-    B24 = ((0,2,0,1),(3,0,0,0))
-    B25 = ((0,1,0,2),(3,0,0,0))
-    B26 = ((0,1,2,0),(3,0,0,0))
-    B27 = ((1,1,1,0),(3,0,0,0))
-    B28 = ((1,1,0,1),(3,0,0,0))
-    B29 = ((1,0,0,2),(3,0,0,0))
-    B30 = ((1,0,2,0),(3,0,0,0))
-    B31 = ((2,0,1,0),(3,0,0,0))
-    B32 = ((3,0,0,0),(3,0,0,0))
+    
+    MOVES = [(1,0), (2,0), (0,1), (0,2), (1,1)]
+    GOAL = (3, 3, 0)
 
-    # estados adicionales
-    B33 = ((0,2,0,1),(0,2,0,1))
-    B34 = ((0,2,1,0),(0,2,1,0))
-    B35 = ((1,2,0,0),(0,2,1,0))
-    B36 = ((1,2,0,0),(0,2,0,1))
-    B37 = ((1,2,0,0),(0,3,0,0))
+    def is_valid(self, state):
+        Ml, Cl, boat = state
+        Mr = 3 - Ml
+        Cr = 3 - Cl
 
-    # ---------------- GRAFO ----------------
-    estados_principales = [
-        B1,B2,B3,B4,B5,B6,B7,B8,
-        B9,B10,B11,B12,B13,B14,B15,B16,
-        B17,B18,B19,B20,B21,B22,B23,B24,
-        B25,B26,B27,B28,B29,B30,B31,B32
-    ]
+        if not (0 <= Ml <= 3 and 0 <= Cl <= 3):
+            return False
 
-    acciones_principales = [
-        "CS","CS","K","CB","K","CS","K","CB","K","CB",
-        "MS","MS","K","MB","CS","K","CB","MS","K","MB",
-        "MB","CS","K","CS","K","CB","K","CS","K","CB","CB"
-    ]
+        if Ml > 0 and Cl > Ml:
+            return False
+        if Mr > 0 and Cr > Mr:
+            return False
 
-    # camino alterno
-    estados_extra = [B33,B34,B35,B36,B37,B6]
-    acciones_extra = ["K","CB","K","MB","CS"]
+        return True
 
-    # ---------- CLICK ----------
+    def successors(self, state):
+        Ml, Cl, boat = state
+        succs = []
+
+        if boat == 0: 
+            sign = -1
+        else:       
+            sign = 1
+
+        for dm, dc in self.MOVES:
+            new_state = (Ml + sign*dm, Cl + sign*dc, 1 - boat)
+            if self.is_valid(new_state):
+                succs.append((new_state, (dm, dc)))
+
+        return succs
+
+    def bfs(self, start, goal):
+        queue = deque([start])
+        parent = {start: None}
+        move_used = {start: None}
+
+        while queue:
+            state = queue.popleft()
+            if state == goal:
+                return parent, move_used
+
+            for new_state, move in self.successors(state):
+                if new_state not in parent:
+                    parent[new_state] = state
+                    move_used[new_state] = move
+                    queue.append(new_state)
+
+        return None, None
+
+    def reconstruct_path(self, parent, move_used, goal):
+        path = []
+        cur = goal
+        while cur is not None:
+            path.append((cur, move_used[cur]))
+            cur = parent[cur]
+        path.reverse()
+        return path
+
+    def __init__(self):
+        self.remaining_m = 0
+        self.remaining_c = 0
+        self.is_boarding = False
+
     def click_en(self, coord, duracion=0.1):
         if coord is None:
             return
@@ -73,25 +82,22 @@ class Agent:
         x, y = coord
 
         pyautogui.moveTo(x, y, duration=duracion,
-                        tween=pyautogui.easeInOutQuad)
-
+                         tween=pyautogui.easeInOutQuad)
         pyautogui.click()
 
-    # ---------- ESTADO ----------
     def get_estado(self, p):
         return (
             (min(len(p["cizq"]), 3),
-            min(len(p["cder"]), 3),
-            min(len(p["cizqb"]), 3),
-            min(len(p["cderb"]), 3)),
+             min(len(p["cder"]), 3),
+             min(len(p["cizqb"]), 3),
+             min(len(p["cderb"]), 3)),
 
             (min(len(p["mizq"]), 3),
-            min(len(p["mder"]), 3),
-            min(len(p["mizqb"]), 3),
-            min(len(p["mderb"]), 3))
+             min(len(p["mder"]), 3),
+             min(len(p["mizqb"]), 3),
+             min(len(p["mderb"]), 3))
         )
 
-    # ---------- ACCIONES ----------
     def procesar_accion(self, accion, posiciones):
         der = posiciones["rio"] < posiciones["bote"][0][0]
 
@@ -109,27 +115,53 @@ class Agent:
 
         elif accion == "K":
             self.click_en(posiciones["bote"][0])
-    
+
     def compute(self, percept):
-        estado = self.get_estado(percept)
-        
         print(percept)
         accion = None
 
-        for i in range(len(self.estados_principales)-1):
-            if estado == self.estados_principales[i]:
-                accion = self.acciones_principales[i]
+        der = percept["rio"] < percept["bote"][0][0]
+        boat = 1 if der else 0
+
+        c_on_boat = len(percept["cderb"]) if der else len(percept["cizqb"])
+        m_on_boat = len(percept["mderb"]) if der else len(percept["mizqb"])
+
+        if (c_on_boat + m_on_boat > 0) and not self.is_boarding:
+            if c_on_boat > 0:
+                accion = "CB"
+            else:
+                accion = "MB"
+            self.procesar_accion(accion, percept)
+        else:
+            if self.remaining_c + self.remaining_m > 0:
+                if self.remaining_c > 0:
+                    accion = "CS"
+                    self.remaining_c -= 1
+                else:
+                    accion = "MS"
+                    self.remaining_m -= 1
                 self.procesar_accion(accion, percept)
-                break
+            elif self.is_boarding:
+                accion = "K"
+                self.procesar_accion(accion, percept)
+                self.is_boarding = False
+            else:
+                Ml = len(percept["mizq"])
+                Cl = len(percept["cizq"])
+                current_state = (Ml, Cl, boat)
+                if current_state == self.GOAL:
+                    return self.get_estado(percept)
+                parent, move_used = self.bfs(current_state, self.GOAL)
+                if parent is None:
+                    print("No se encontró solución.")
+                    return self.get_estado(percept)
+                path = self.reconstruct_path(parent, move_used, self.GOAL)
+                next_move = path[1][1]
+                self.remaining_m = next_move[0]
+                self.remaining_c = next_move[1]
+                self.is_boarding = True
 
-        if accion is None:
-            for i in range(len(self.estados_extra)-1):
-                if estado == self.estados_extra[i]:
-                    accion = self.acciones_extra[i]
-                    self.procesar_accion(accion, percept)
-                    break
-
-        return estado
+        return self.get_estado(percept)
 
 class Environment:
     sct = mss.mss()
@@ -142,7 +174,6 @@ class Environment:
     TOL = 12
     DISTANCIA_CLUSTER = 60
 
-    # ---------- HEX → BGR ----------
     def hex_to_bgr(self, hex_color):
         hex_color = hex_color.lstrip("#")
         r = int(hex_color[0:2], 16)
@@ -150,14 +181,12 @@ class Environment:
         b = int(hex_color[4:6], 16)
         return np.array([b, g, r], dtype=np.int16)
 
-    # ---------- CREAR MASK ----------
     def crear_mask(self, img, color):
         lower = np.clip(color - self.TOL, 0, 255).astype(np.uint8)
         upper = np.clip(color + self.TOL, 0, 255).astype(np.uint8)
 
         return cv2.inRange(img, lower, upper)
 
-    # ---------- CLUSTER RAPIDO ----------
     def clusterizar(self, mask):
         puntos = np.column_stack(np.where(mask > 0))
 
@@ -167,13 +196,10 @@ class Environment:
         centros = []
 
         for y, x in puntos:
-
             agregado = False
 
             for i, (cx, cy, count) in enumerate(centros):
-
                 if abs(cx - x) < self.DISTANCIA_CLUSTER and abs(cy - y) < self.DISTANCIA_CLUSTER:
-
                     centros[i] = (
                         (cx * count + x) / (count + 1),
                         (cy * count + y) / (count + 1),
@@ -187,7 +213,6 @@ class Environment:
 
         return [(int(cx), int(cy)) for cx, cy, c in centros if c > 200]
 
-    # ---------- DETECTAR RIO ----------
     def detectar_rio(self, mask):
         puntos = np.column_stack(np.where(mask > 0))
 
@@ -195,7 +220,7 @@ class Environment:
             return 0
 
         return int(np.median(puntos[:, 1]))
-    
+
     def detectar_elementos(self):
         screen = np.array(self.sct.grab(self.sct.monitors[0]))
         screen = cv2.cvtColor(screen, cv2.COLOR_BGRA2BGR)
@@ -216,47 +241,48 @@ class Environment:
             "mizq": [], "mder": [],
             "cizqb": [], "cderb": [],
             "mizqb": [], "mderb": [],
-            "bote": []
+            "bote": [],
+            "rio": x_rio
         }
 
-        bote = botes[0] if botes else None
-
-        if bote:
-            posiciones["bote"].append(bote)
+        if botes:
+            posiciones["bote"].append(botes[0])
 
         margen_botex = 170
         margen_botey = 170
         margen_boteycan = 200
 
         def esta_en_bote(canibal, x, y):
-
-            if bote is None:
+            if not posiciones["bote"]:
                 return False
-
-            bx, by = bote
-
+            bx, by = posiciones["bote"][0]
             if canibal:
                 return abs(x - bx) < margen_botex and abs(y - by) < margen_boteycan
-
             return abs(x - bx) < margen_botex and abs(y - by) < margen_botey
 
-        # CANIBALES
         for x, y in canibales:
-
             if esta_en_bote(True, x, y):
-                (posiciones["cizqb"] if x < x_rio else posiciones["cderb"]).append((x, y))
+                if x < x_rio:
+                    posiciones["cizqb"].append((x, y))
+                else:
+                    posiciones["cderb"].append((x, y))
             else:
-                (posiciones["cizq"] if x < x_rio else posiciones["cder"]).append((x, y))
+                if x < x_rio:
+                    posiciones["cizq"].append((x, y))
+                else:
+                    posiciones["cder"].append((x, y))
 
-        # MISIONEROS
         for x, y in misioneros:
-
             if esta_en_bote(False, x, y):
-                (posiciones["mizqb"] if x < x_rio else posiciones["mderb"]).append((x, y))
+                if x < x_rio:
+                    posiciones["mizqb"].append((x, y))
+                else:
+                    posiciones["mderb"].append((x, y))
             else:
-                (posiciones["mizq"] if x < x_rio else posiciones["mder"]).append((x, y))
-
-        posiciones["rio"] = x_rio
+                if x < x_rio:
+                    posiciones["mizq"].append((x, y))
+                else:
+                    posiciones["mder"].append((x, y))
 
         return posiciones
 
@@ -271,7 +297,6 @@ class Environment:
 
 time.sleep(2)
 
-#Main program
 agent = Agent()
 env = Environment()
 
